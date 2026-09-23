@@ -1,0 +1,10 @@
+[Unit]
+Description=Clash of Clans CWL Tracker - Collector (esecuzione singola)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/coc-cwl-tracker
+EnvironmentFile=/opt/coc-cwl-tracker/.env
+ExecStart=/opt/coc-cwl-tracker/venv/bin/python -m collector.run
