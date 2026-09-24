@@ -74,10 +74,23 @@ CREATE INDEX IF NOT EXISTS idx_attacks_defender ON attacks(defender_tag);
 
 @contextmanager
 def get_conn(db_path: str | None = None):
+    """Apre una connessione per l'uso corrente e la chiude alla fine del
+    blocco `with` — è il pattern corretto per sqlite3 (le connessioni non
+    sono condivisibili tra thread) e con FastAPI ogni richiesta gira nel suo
+    thread, quindi ognuna apre la propria connessione.
+
+    Con l'aggiornamento manuale dal pulsante, il collector (che scrive) può
+    girare mentre qualcuno sta guardando /classifica (che legge): WAL
+    permette lettori e scrittore di convivere senza bloccarsi a vicenda, e
+    busy_timeout fa aspettare invece di fallire subito se capita comunque un
+    breve conflitto.
+    """
     path = db_path or config.DB_PATH
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.row_factory = sqlite3.Row
     try:
         yield conn

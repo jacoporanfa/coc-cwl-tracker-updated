@@ -126,15 +126,6 @@ class RankingResult:
         }
 
 
-def _per_war_averages(attacks: list[sqlite3.Row], cfg: ScoringConfig) -> list[float]:
-    by_war: dict[int, list[float]] = defaultdict(list)
-    for a in attacks:
-        q = attack_quality(a["stars"], a["destruction_pct"], cfg)
-        m = difficulty_multiplier(a["attacker_th"], a["defender_th"], cfg)
-        by_war[a["war_id"]].append(q * m)
-    return [mean(values) for values in by_war.values()]
-
-
 def _confidence(wars_played: int, cfg: ScoringConfig) -> float:
     """Confidence progressiva: pochi dati non vengono trattati come una
     cronologia lunga, senza introdurre un bonus artificiale al volume."""
@@ -172,16 +163,23 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
     if not rows:
         return result
 
-    by_player: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    # Ogni attacco viene pesato (qualità × difficoltà) una sola volta qui, e il
+    # risultato viene riusato sia per la media di clan sia per i calcoli per
+    # giocatore/per guerra più sotto — prima veniva ricalcolato fino a 3 volte
+    # per lo stesso attacco (una volta per la media di clan, una nel ciclo per
+    # giocatore, una dentro il vecchio _per_war_averages).
+    weighted_attacks: list[tuple[sqlite3.Row, float, float]] = []
     for r in rows:
-        by_player[r["attacker_tag"]].append(r)
+        m = difficulty_multiplier(r["attacker_th"], r["defender_th"], cfg)
+        q = attack_quality(r["stars"], r["destruction_pct"], cfg)
+        weighted_attacks.append((r, q * m, m))
 
-    all_weighted = [
-        attack_quality(r["stars"], r["destruction_pct"], cfg)
-        * difficulty_multiplier(r["attacker_th"], r["defender_th"], cfg)
-        for r in rows
-    ]
-    clan_avg = mean(all_weighted)
+    clan_avg = mean(w for _, w, _ in weighted_attacks)
+
+    by_player: dict[str, list[tuple[sqlite3.Row, float, float]]] = defaultdict(list)
+    for item in weighted_attacks:
+        by_player[item[0]["attacker_tag"]].append(item)
+
     players_info = db.fetch_players_by_tag(conn, list(by_player.keys()))
 
     # Il roster può contenere giocatori che hanno effettuato zero attacchi.
@@ -196,23 +194,23 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
         }
 
     rankings: list[PlayerRanking] = []
-    for tag, attacks in by_player.items():
-        weighted, th_diffs, stars_list, war_ids, multipliers = [], [], [], set(), []
-        for a in attacks:
-            q = attack_quality(a["stars"], a["destruction_pct"], cfg)
-            m = difficulty_multiplier(a["attacker_th"], a["defender_th"], cfg)
-            weighted.append(q * m)
+    for tag, items in by_player.items():
+        weighted, th_diffs, stars_list, multipliers = [], [], [], []
+        by_war: dict[int, list[float]] = defaultdict(list)
+        for a, w, m in items:
+            weighted.append(w)
             multipliers.append(m)
+            by_war[a["war_id"]].append(w)
             if a["attacker_th"] is not None and a["defender_th"] is not None:
                 th_diffs.append(a["defender_th"] - a["attacker_th"])
             stars_list.append(a["stars"] or 0)
-            war_ids.add(a["war_id"])
+        war_ids = set(by_war.keys())
 
-        n = len(attacks)
+        n = len(items)
         raw_avg = mean(weighted)
         adjusted_avg = (raw_avg * n + clan_avg * cfg.shrinkage_k) / (n + cfg.shrinkage_k)
 
-        per_war_avgs = _per_war_averages(attacks, cfg)
+        per_war_avgs = [mean(values) for values in by_war.values()]
         if len(per_war_avgs) >= 2 and mean(per_war_avgs) > 0:
             cv = pstdev(per_war_avgs) / mean(per_war_avgs)
             consistency = 1 - min(
