@@ -15,6 +15,7 @@ poi apri http://127.0.0.1:8000/classifica
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +28,11 @@ from collector import db, scoring, run
 
 app = FastAPI(title="CoC CWL Tracker - Ranking")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Il pulsante "Aggiorna" sostituisce il polling periodico con una chiamata su
+# richiesta. Il lock evita che due click ravvicinati (o due tab aperte)
+# lancino due raccolte in parallelo: stessa chiave API, stesso database.
+_refresh_lock = threading.Lock()
 
 @app.on_event("startup")
 def startup() -> None:
@@ -83,11 +89,19 @@ def refresh_ranking(war_type: Literal["all", "regular", "cwl"] = "all") -> dict:
     """Aggiorna il database tramite il collector e restituisce la nuova classifica.
 
     Il collector è già idempotente: riutilizziamo run_once() invece di
-    duplicare qui la logica di raccolta/API.
+    duplicare qui la logica di raccolta/API. Il lock serializza eventuali
+    click doppi o richieste da tab diverse.
     """
+    if not _refresh_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="Un aggiornamento è già in corso: aspetta che finisca prima di riprovare.",
+        )
     try:
         run.run_once()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Aggiornamento dati fallito: {exc}")
+    finally:
+        _refresh_lock.release()
 
     return _get_ranking(war_type, None).as_dict()
