@@ -2,8 +2,8 @@
 Motore di valutazione e classifica dei giocatori per la CWL.
 
 Il punteggio separa due concetti:
-- PERFORMANCE: qualità degli attacchi, difficoltà dei bersagli, correzione per
-  campioni piccoli e costanza della performance;
+- PERFORMANCE: qualità degli attacchi, correzione per campioni piccoli e
+  costanza della performance;
 - REPUTAZIONE: affidabilità nel tempo, ricavata da presenza nel roster e
   utilizzo degli attacchi disponibili.
 
@@ -24,9 +24,6 @@ from . import db
 
 @dataclass
 class ScoringConfig:
-    difficulty_coefficient: float = 0.15
-    difficulty_min: float = 0.5
-    difficulty_max: float = 1.75
     destruction_weight: float = 0.3
     shrinkage_k: float = 5.0
     consistency_max_penalty: float = 0.15
@@ -37,9 +34,6 @@ class ScoringConfig:
     # distinguere affidabilità diverse, ma non abbastanza da compensare una
     # performance offensiva nettamente peggiore.
     reputation_weight: float = 0.15
-
-    # Quanti dati servono prima che la reputazione abbia piena fiducia.
-    reputation_confidence_wars: float = 5.0
 
     # Piccolo contributo dei risultati degli attacchi alla reputazione.
     # La performance resta comunque il cuore del punteggio.
@@ -71,15 +65,6 @@ def attack_quality(stars: int | None, destruction_pct: float | None,
     return stars + cfg.destruction_weight * (destruction_pct / 100)
 
 
-def difficulty_multiplier(attacker_th: int | None, defender_th: int | None,
-                          cfg: ScoringConfig) -> float:
-    if attacker_th is None or defender_th is None:
-        return 1.0
-    th_diff = defender_th - attacker_th
-    raw = 1 + cfg.difficulty_coefficient * th_diff
-    return max(cfg.difficulty_min, min(cfg.difficulty_max, raw))
-
-
 @dataclass
 class PlayerRanking:
     position: int
@@ -95,8 +80,6 @@ class PlayerRanking:
     stars_total: int
     avg_stars: float
     success_rate: float
-    avg_th_diff: float
-    avg_difficulty_multiplier: float
     raw_avg_quality: float
     adjusted_avg_quality: float
     consistency_factor: float
@@ -126,12 +109,15 @@ class RankingResult:
         }
 
 
-def _confidence(wars_played: int, cfg: ScoringConfig) -> float:
-    """Confidence progressiva: pochi dati non vengono trattati come una
-    cronologia lunga, senza introdurre un bonus artificiale al volume."""
-    if wars_played <= 0:
+def _confidence(attacks_available: int, attacks_done: int) -> float:
+    """Affidabilità basata sull'utilizzo degli attacchi disponibili.
+
+    Una cronologia breve non viene penalizzata: 2 attacchi su 2 e 10 attacchi
+    su 10 producono entrambi un'affidabilità del 100%.
+    """
+    if attacks_available <= 0:
         return 0.0
-    return min(1.0, wars_played / (wars_played + cfg.reputation_confidence_wars))
+    return min(1.0, max(0.0, attacks_done / attacks_available))
 
 
 def _reputation_label(value: float) -> str:
@@ -163,20 +149,14 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
     if not rows:
         return result
 
-    # Ogni attacco viene pesato (qualità × difficoltà) una sola volta qui, e il
-    # risultato viene riusato sia per la media di clan sia per i calcoli per
-    # giocatore/per guerra più sotto — prima veniva ricalcolato fino a 3 volte
-    # per lo stesso attacco (una volta per la media di clan, una nel ciclo per
-    # giocatore, una dentro il vecchio _per_war_averages).
-    weighted_attacks: list[tuple[sqlite3.Row, float, float]] = []
+    weighted_attacks: list[tuple[sqlite3.Row, float]] = []
     for r in rows:
-        m = difficulty_multiplier(r["attacker_th"], r["defender_th"], cfg)
         q = attack_quality(r["stars"], r["destruction_pct"], cfg)
-        weighted_attacks.append((r, q * m, m))
+        weighted_attacks.append((r, q))
 
-    clan_avg = mean(w for _, w, _ in weighted_attacks)
+    clan_avg = mean(w for _, w in weighted_attacks)
 
-    by_player: dict[str, list[tuple[sqlite3.Row, float, float]]] = defaultdict(list)
+    by_player: dict[str, list[tuple[sqlite3.Row, float]]] = defaultdict(list)
     for item in weighted_attacks:
         by_player[item[0]["attacker_tag"]].append(item)
 
@@ -195,14 +175,11 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
 
     rankings: list[PlayerRanking] = []
     for tag, items in by_player.items():
-        weighted, th_diffs, stars_list, multipliers = [], [], [], []
+        weighted, stars_list = [], []
         by_war: dict[int, list[float]] = defaultdict(list)
-        for a, w, m in items:
+        for a, w in items:
             weighted.append(w)
-            multipliers.append(m)
             by_war[a["war_id"]].append(w)
-            if a["attacker_th"] is not None and a["defender_th"] is not None:
-                th_diffs.append(a["defender_th"] - a["attacker_th"])
             stars_list.append(a["stars"] or 0)
         war_ids = set(by_war.keys())
 
@@ -240,7 +217,7 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
             min(1.0, attacks_made / attacks_available)
             if attacks_available > 0 else 0.0
         )
-        confidence = _confidence(wars_played, cfg)
+        confidence = _confidence(attacks_available, attacks_made)
 
         # Reputazione = affidabilità di utilizzo delle opportunità disponibili
         # + piccolo contributo ai risultati. La confidence evita che 1-2 war
@@ -273,8 +250,6 @@ def compute_ranking(conn, war_type: str = "all", since: str | None = None,
             stars_total=sum(stars_list),
             avg_stars=round(mean(stars_list), 2),
             success_rate=round(success_rate, 3),
-            avg_th_diff=round(mean(th_diffs), 2) if th_diffs else 0.0,
-            avg_difficulty_multiplier=round(mean(multipliers), 3),
             raw_avg_quality=round(raw_avg, 3),
             adjusted_avg_quality=round(adjusted_avg, 3),
             consistency_factor=round(consistency, 3),

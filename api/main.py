@@ -45,7 +45,7 @@ def startup() -> None:
 SORTABLE_FIELDS = {
     "score", "name", "wars_played", "attacks_made", "attacks_available",
     "participation_rate", "reputation", "stars_total", "avg_stars",
-    "success_rate", "avg_th_diff",
+    "success_rate",
 }
 
 

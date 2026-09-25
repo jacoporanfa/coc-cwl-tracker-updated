@@ -5,16 +5,14 @@ Non chiama nessuna API: inserisce direttamente nel database, con lo stesso
 schema usato dal collector, tre giocatori con profili molto diversi
 (coerenti con gli esempi discussi in fase di analisi):
 
-- Player A: poche guerre, sempre attacchi di alta qualità contro bersagli
-  pari o più alti di TH.
+- Player A: poche guerre, sempre attacchi di alta qualità.
 - Player B: tante guerre, tanti attacchi, ma quasi sempre contro bersagli
   più deboli.
 - Player C: pochissimi attacchi, molto incostanti (un attacco perfetto, uno
   pessimo, uno mediocre).
 
-Verifica che il punteggio finale rifletta la qualità pesata per difficoltà
-e non il volume di attacchi, e che l'ordinamento risultante sia quello
-atteso.
+Verifica che il punteggio finale rifletta la qualità degli attacchi e la
+partecipazione, e che l'ordinamento risultante sia quello atteso.
 
 Uso: python -m tests.test_scoring   (dalla root del progetto)
 """
@@ -65,7 +63,7 @@ def _add_attacks(conn, war_id: int, attacker_tag: str, attacks: list[tuple[int, 
 
 
 def _set_participant(conn, war_id: int, tag: str, attacks_made: int,
-                      attacks_available: int = 1) -> None:
+                      attacks_available: int = 2) -> None:
     db.replace_war_participants(conn, war_id, [{
         "player_tag": tag,
         "attacks_available": attacks_available,
@@ -88,26 +86,26 @@ def test_reputation_distinguishes_participation() -> None:
         with db.get_conn(db_path) as conn:
             _setup_players(conn)
 
-            # D: ottima performance ma perde molte opportunità (2/10 attacchi).
+            # D: ottima performance ma perde molte opportunità (2/20 attacchi).
             for i in range(10):
                 w = _make_war(conn, f"d-war-{i}", f"2026-09-{i+1:02d}")
                 _add_attacks(conn, w, "#A", [(3, 100, 0)] if i < 2 else [])
                 _set_participant(conn, w, "#A", 1 if i < 2 else 0)
 
-            # E: stessa qualità negli attacchi, ma li usa tutti (10/10).
+            # E: stessa qualità negli attacchi, ma li usa tutti (20/20).
             for i in range(10):
                 w = _make_war(conn, f"e-war-{i}", f"2026-10-{i+1:02d}")
-                _add_attacks(conn, w, "#B", [(3, 100, 0)])
-                _set_participant(conn, w, "#B", 1)
+                _add_attacks(conn, w, "#B", [(3, 100, 0), (3, 100, 0)])
+                _set_participant(conn, w, "#B", 2)
 
         with db.get_conn(db_path) as conn:
             result = scoring.compute_ranking(conn)
 
         players = {p.tag: p for p in result.players}
-        assert players["#B"].attacks_available == 10
-        assert players["#A"].attacks_available == 10
+        assert players["#B"].attacks_available == 20
+        assert players["#A"].attacks_available == 20
         assert players["#B"].participation_rate == 1.0
-        assert players["#A"].participation_rate == 0.2
+        assert players["#A"].participation_rate == 0.1
         assert players["#B"].reputation > players["#A"].reputation
         assert players["#B"].score > players["#A"].score
 
@@ -160,17 +158,15 @@ def main() -> None:
         assert players["#C"].wars_played == 3
         assert players["#C"].attacks_made == 3
 
-        # Il giocatore che attacca bersagli più difficili con più successo
-        # deve vincere, nonostante meno attacchi totali.
+        # Il giocatore con attacchi di qualità migliore deve vincere,
+        # nonostante meno attacchi totali.
         ordered_tags = [p.tag for p in result.players]
         assert ordered_tags[0] == "#A", f"atteso #A in testa, trovato: {ordered_tags}"
         assert players["#A"].score > players["#B"].score
         assert players["#A"].score > players["#C"].score
 
-        # Il volume puro di attacchi facili (B) non deve garantire un
-        # punteggio nettamente superiore a un campione piccolo (C): sono
-        # nello stesso ordine di grandezza, non separati da un fattore 2x+.
-        assert abs(players["#B"].score - players["#C"].score) < 15
+        # La differenza di Town Hall non influenza il punteggio.
+        assert players["#B"].score > players["#C"].score
 
         # Il position field riflette l'ordinamento
         assert result.players[0].position == 1
@@ -189,7 +185,7 @@ def main() -> None:
     for p in result.players:
         print(f"  {p.position}. {p.name:10s} score={p.score:6.2f}  "
               f"({p.rating}) — guerre={p.wars_played} attacchi={p.attacks_made} "
-              f"stelle={p.stars_total} diff_TH_media={p.avg_th_diff}")
+              f"stelle={p.stars_total}")
 
 
 if __name__ == "__main__":

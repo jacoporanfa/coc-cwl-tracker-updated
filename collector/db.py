@@ -235,8 +235,8 @@ def replace_attacks(conn, war_id: int, attacks: list[dict]) -> None:
 def replace_war_participants(conn, war_id: int, participants: list[dict]) -> None:
     """Salva lo snapshot del roster della guerra.
 
-    Ogni membro della guerra ha normalmente un attacco disponibile; il dato
-    viene comunque passato esplicitamente per lasciare il modello estendibile.
+    Il numero di attacchi disponibili viene passato esplicitamente perché
+    dipende dal tipo di guerra.
     """
     conn.execute("DELETE FROM war_participants WHERE war_id = ?", (war_id,))
     if not participants:

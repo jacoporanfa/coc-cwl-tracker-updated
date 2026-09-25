@@ -144,7 +144,6 @@ Il motore separa **performance** e **reputazione**.
 
 ```
 qualità_attacco = stelle + 0.3 × (distruzione% / 100)
-moltiplicatore_difficoltà = clamp(1 + 0.15 × (TH_avversario − TH_proprio), 0.5, 1.75)
 media_corretta = shrinkage verso la media del clan per i campioni piccoli
 performance = media_corretta × costanza × 25
 

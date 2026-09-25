@@ -114,7 +114,8 @@ def store_war(conn, war_json: dict, *, clan_tag: str, war_type: str,
     participants = [
         {
             "player_tag": m["tag"],
-            "attacks_available": 1,
+            # Regular wars allow two attacks per member; CWL allows one.
+            "attacks_available": 2 if war_type == "regular" else 1,
             "attacks_made": len(m.get("attacks", [])),
         }
         for m in clan.get("members", [])

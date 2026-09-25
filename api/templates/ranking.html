@@ -75,7 +75,6 @@
         <th>{{ sort_link('stars_total', 'Stelle') }}</th>
         <th>{{ sort_link('avg_stars', 'Media stelle') }}</th>
         <th>{{ sort_link('success_rate', '% riusciti') }}</th>
-        <th>{{ sort_link('avg_th_diff', 'Diff. TH') }}</th>
         <th>Valutazione</th>
       </tr>
     </thead>
@@ -93,7 +92,6 @@
         <td>{{ p.stars_total }}</td>
         <td>{{ p.avg_stars }}</td>
         <td>{{ (p.success_rate * 100) | round(1) }}%</td>
-        <td>{{ "%+.2f"|format(p.avg_th_diff) }}</td>
         <td class="rating rating-{{ p.rating.replace(' ', '_') }}">{{ p.rating }}</td>
       </tr>
       <tr class="breakdown-row">
@@ -108,11 +106,9 @@
               × costanza <strong>{{ p.consistency_factor }}</strong>.
               Reputazione: <strong>{{ p.reputation }}</strong>/100,
               con partecipazione <strong>{{ (p.participation_rate * 100) | round(1) }}%</strong>
-              e confidenza storica <strong>{{ (p.participation_confidence * 100) | round(0) }}%</strong>.
+              e affidabilità d'uso degli attacchi <strong>{{ (p.participation_confidence * 100) | round(0) }}%</strong>.
               Il punteggio finale combina performance ({{ ((1 - 0.15) * 100) | round(0) }}%)
               e reputazione (15%).
-              Moltiplicatore difficoltà medio: <strong>{{ p.avg_difficulty_multiplier }}</strong>
-              (bersagli mediamente {{ "%+.2f"|format(p.avg_th_diff) }} livelli TH rispetto al proprio).
             </div>
           </details>
         </td>

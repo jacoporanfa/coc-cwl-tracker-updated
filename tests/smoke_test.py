@@ -46,7 +46,7 @@ def main() -> None:
             ).fetchall()
             assert len(participants) == 2
             mario_part = next(p for p in participants if p["player_tag"] == "#P1")
-            assert mario_part["attacks_available"] == 1
+            assert mario_part["attacks_available"] == 2
             assert mario_part["attacks_made"] == 1
 
             # Verifica che i TH siano stati abbinati correttamente
